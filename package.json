@@ -1,0 +1,21 @@
+{
+  "name": "com.smit.voxelmodeler",
+  "version": "0.1.0",
+  "displayName": "Voxel Modeler",
+  "description": "A voxel modeling and FBX export tool for Unity Editor.",
+  "unity": "2020.3",
+  "author": {
+    "name": "Smit dangar",
+    "url": "https://github.com/SmitBdangar"
+  },
+  "keywords": [
+    "voxel",
+    "modeling",
+    "fbx",
+    "editor",
+    "tool"
+  ],
+  "dependencies": {
+    "com.unity.formats.fbx": "4.1.0"
+  }
+}
