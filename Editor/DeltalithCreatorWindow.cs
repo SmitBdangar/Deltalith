@@ -1,14 +1,3 @@
-// DeltalithCreatorWindow.cs
-// Place in: DELTALITH/Editor/DeltalithCreatorWindow.cs
-//
-// Clean, stable editor window:
-// - Isolated preview world rendered to a RenderTexture (not the Scene view)
-// - Deterministic 1×1×1 grid on XZ plane where voxels snap perfectly
-// - Safe initialization & RenderTexture lifecycle (no camera-target detach warnings)
-// - Grid rendered as line mesh (MeshTopology.Lines) and always aligned
-// - Hover cube and painting snap to integer voxel coordinates inside chunk bounds
-// - Guards to avoid GUILayout mismatches / NREs
-
 using UnityEditor;
 using UnityEngine;
 using Deltalith.Runtime;
@@ -92,7 +81,7 @@ namespace Deltalith.Editor
         {
             LoadPalette();
             LoadRecentColors();
-            initialized = false; // lazy init
+            initialized = false; 
         }
 
         void OnDisable()
@@ -126,7 +115,6 @@ namespace Deltalith.Editor
 
         void OnGUI()
         {
-            // lazy init: ensures no GUI tries to access preview objects before they exist
             EnsureInitialized();
 
             EditorGUILayout.BeginHorizontal();
@@ -276,7 +264,6 @@ namespace Deltalith.Editor
             return false;
         }
 
-        // Palette persistence
         void SavePalette()
         {
             for (int i = 0; i < palette.Length; i++)
@@ -343,10 +330,8 @@ namespace Deltalith.Editor
 
         void DrawViewportPanel()
         {
-            // Reserve the viewportRect from layout
             viewportRect = GUILayoutUtility.GetRect(position.width - 300, position.height, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
 
-            // If RT size differs, recreate safely
             if (Event.current.type == EventType.Repaint && (rt == null || rt.width != (int)viewportRect.width || rt.height != (int)viewportRect.height))
             {
                 int w = Mathf.Max(256, (int)viewportRect.width);
@@ -370,15 +355,13 @@ namespace Deltalith.Editor
             Event e = Event.current;
             Vector2 mouse = e.mousePosition;
 
-            // Mouse inside viewport?
             if (!viewportRect.Contains(mouse)) return;
 
             // transform GUI pos to RenderTexture pixel coords
             Vector2 local = mouse - viewportRect.position;
             int px = (int)((local.x / viewportRect.width) * rt.width);
-            int py = (int)(((viewportRect.height - local.y) / viewportRect.height) * rt.height); // invert y for RT
+            int py = (int)(((viewportRect.height - local.y) / viewportRect.height) * rt.height); 
 
-            // camera control
             if (e.type == EventType.MouseDrag && e.button == 1) // right drag rotate
             {
                 Vector2 delta = e.delta;
@@ -401,7 +384,6 @@ namespace Deltalith.Editor
                 e.Use();
             }
 
-            // painting (mouse down)
             if (e.type == EventType.MouseDown && (e.button == 0 || e.button == 1))
             {
                 bool paint = (e.button == 0);
@@ -409,7 +391,6 @@ namespace Deltalith.Editor
                 e.Use();
             }
 
-            // continuous painting while dragging with left button
             if (e.type == EventType.MouseDrag && e.button == 0)
             {
                 TryEditVoxelAtPixel(px, py, true);
@@ -448,7 +429,6 @@ namespace Deltalith.Editor
 
         Ray RayFromViewportPixel(int px, int py)
         {
-            // returns a ray in world space from camera for RT pixel coords (origin bottom-left)
             if (!SafeToRender())
                 return new Ray(Vector3.zero, Vector3.forward);
 
@@ -584,7 +564,6 @@ namespace Deltalith.Editor
 
         void CreatePreviewObjects(int width, int height)
         {
-            // Detach camera from old RT before destroying
             if (previewCamera != null)
                 previewCamera.targetTexture = null;
 
@@ -618,7 +597,6 @@ namespace Deltalith.Editor
             if (!previewRoot.TryGetComponent<MeshCollider>(out previewMeshCollider))
                 previewMeshCollider = previewRoot.AddComponent<MeshCollider>();
 
-            // make sure mesh renderer has a simple material
             if (previewMeshRenderer.sharedMaterial == null)
             {
                 var mat = new Material(Shader.Find("Standard"));
@@ -649,10 +627,8 @@ namespace Deltalith.Editor
                 previewLight.transform.rotation = Quaternion.Euler(50, -30, 0);
             }
 
-            // grid object (lines drawn on XZ plane)
             CreateOrUpdateGridMesh();
 
-            // reset transforms / camera defaults
             previewRoot.transform.position = Vector3.zero;
             previewRoot.transform.rotation = Quaternion.identity;
             previewRoot.transform.localScale = Vector3.one;
@@ -664,14 +640,12 @@ namespace Deltalith.Editor
             previewCamera.targetTexture = rt;
             previewCamera.aspect = (float)rt.width / rt.height;
 
-            // ensure chunk has array and mesh reflects it
             previewChunk.EnsureArray();
             RegeneratePreviewMesh();
         }
 
         void CreateOrUpdateGridMesh()
         {
-            // grid GO is child of previewRoot so it follows the preview root transform
             if (gridGO == null)
             {
                 gridGO = new GameObject("DeltalithGrid");
@@ -687,20 +661,17 @@ namespace Deltalith.Editor
             if (!gridGO.TryGetComponent<MeshRenderer>(out gridMeshRenderer))
                 gridMeshRenderer = gridGO.AddComponent<MeshRenderer>();
 
-            // simple unlit color material for grid
             if (gridMeshRenderer.sharedMaterial == null)
             {
                 var mat = new Material(Shader.Find("Unlit/Color"));
                 if (mat == null)
                 {
-                    // fallback to Standard if Unlit/Color not available
                     mat = new Material(Shader.Find("Standard"));
                 }
                 mat.SetColor("_Color", new Color(0.6f, 0.6f, 0.6f, 1f));
                 gridMeshRenderer.sharedMaterial = mat;
             }
 
-            // Build a lines mesh on XZ plane from (0..ChunkSize)
             int size = VoxelChunk.ChunkSize;
             float spacing = 1f;
             int lineCount = (size + 1) * 2;
@@ -710,7 +681,6 @@ namespace Deltalith.Editor
             int[] indices = new int[vertsCount];
 
             int idx = 0;
-            // lines along X (vary Z)
             for (int z = 0; z <= size; z++)
             {
                 verts[idx] = new Vector3(0f, 0f, z * spacing);
@@ -720,7 +690,6 @@ namespace Deltalith.Editor
                 indices[idx] = idx;
                 idx++;
             }
-            // lines along Z (vary X)
             for (int x = 0; x <= size; x++)
             {
                 verts[idx] = new Vector3(x * spacing, 0f, 0f);
@@ -741,14 +710,12 @@ namespace Deltalith.Editor
             mesh.RecalculateBounds();
             gridMeshFilter.sharedMesh = mesh;
 
-            // grid should not receive shadows etc
             gridMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             gridMeshRenderer.receiveShadows = false;
         }
 
         void DestroyPreviewObjects()
         {
-            // detach camera from RT before destroying
             if (previewCamera != null)
                 previewCamera.targetTexture = null;
 
@@ -779,7 +746,6 @@ namespace Deltalith.Editor
 
         void CreatePreviewCube()
         {
-            // try builtin cube mesh, fallback to primitive
             previewCubeMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
             if (previewCubeMesh == null)
             {
@@ -789,7 +755,6 @@ namespace Deltalith.Editor
             }
 
             previewCubeMaterial = new Material(Shader.Find("Standard"));
-            // configure for transparency
             previewCubeMaterial.SetFloat("_Mode", 3f);
             previewCubeMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
             previewCubeMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
