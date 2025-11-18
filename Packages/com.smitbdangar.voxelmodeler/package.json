@@ -1,8 +1,8 @@
 {
   "name": "com.smitbdangar.voxelmodeler",
-  "version": "0.1.0",
-  "displayName": "Voxel Modeler",
-  "description": "Unity Editor voxel modeling extension with greedy meshing, painting tools, and FBX export.",
+  "version": "1.0.0",
+  "displayName": "Voxel Creator",
+  "description": "Unity Editor voxel modeling tool with greedy meshing, painting tools, and multi-format export (FBX, OBJ, Prefab).",
   "unity": "2020.3",
   "author": {
     "name": "Smit B Dangar",
@@ -14,7 +14,38 @@
     "modeling",
     "mesh",
     "fbx",
-    "editor"
+    "obj",
+    "editor",
+    "creator",
+    "3d"
+  ],
+  "samples": [
+    {
+      "displayName": "Basic Example",
+      "description": "Example scene showing voxel chunk and painting tools.",
+      "path": "Samples~/BasicExample"
+    }
+  ]
+}{
+  "name": "com.smitbdangar.voxelmodeler",
+  "version": "1.0.0",
+  "displayName": "Voxel Creator",
+  "description": "Unity Editor voxel modeling tool with greedy meshing, painting tools, and multi-format export (FBX, OBJ, Prefab).",
+  "unity": "2020.3",
+  "author": {
+    "name": "Smit B Dangar",
+    "url": "https://github.com/SmitBdanger"
+  },
+  "dependencies": {},
+  "keywords": [
+    "voxel",
+    "modeling",
+    "mesh",
+    "fbx",
+    "obj",
+    "editor",
+    "creator",
+    "3d"
   ],
   "samples": [
     {
