@@ -1,93 +1,66 @@
 using UnityEditor;
 using UnityEngine;
-using VoxelModeler.Runtime;
+using Deltalith.Runtime;
 
-namespace VoxelModeler.Editor {
-    [InitializeOnLoad]
-    public static class SceneBrushTool {
-        static bool toolActive = false;
-        static Color brushColor = Color.white;
-        static int brushMaterialId = 1;
+[InitializeOnLoad]
+public static class SceneBrushTool {
+    static bool isEnabled = false;
+    static Color brushColor = Color.white;
+    static int brushMaterialId = 1;
+    static int brushSize = 1;
 
-        static SceneBrushTool() {
-            SceneView.duringSceneGui += OnSceneGUI;
+    static SceneBrushTool() {
+        SceneView.duringSceneGui += OnSceneGUI;
+    }
+
+    public static void SetBrushSettings(Color color, int materialId, int size) {
+        brushColor = color;
+        brushMaterialId = materialId;
+        brushSize = Mathf.Max(1, size);
+    }
+
+    public static void Enable() => isEnabled = true;
+    public static void Disable() => isEnabled = false;
+
+    static void OnSceneGUI(SceneView sceneView) {
+        if (!isEnabled) return;
+
+        Event e = Event.current;
+        Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+
+        if (!Physics.Raycast(ray, out RaycastHit hit)) return;
+
+        Handles.color = brushColor;
+        Handles.DrawWireCube(hit.point, Vector3.one * brushSize);
+
+        if (e.type == EventType.MouseDown && (e.button == 0 || e.button == 1)) {
+            TryPaintVoxel(hit, e.button == 0);
+            e.Use();
         }
+    }
 
-        static void OnSceneGUI(SceneView sv) {
-            Handles.BeginGUI();
-            
-            GUIStyle buttonStyle = new GUIStyle(GUI.skin.button);
-            buttonStyle.normal.textColor = toolActive ? Color.green : Color.white;
-            buttonStyle.fontStyle = FontStyle.Bold;
-            
-            if (GUI.Button(new Rect(10, 40, 140, 25), "Voxel Brush Toggle", buttonStyle)) {
-                toolActive = !toolActive;
-                SceneView.RepaintAll();
-            }
-            
-            if (toolActive) {
-                GUI.Label(new Rect(10, 70, 140, 20), "Status: ACTIVE", EditorStyles.boldLabel);
-            }
-            
-            Handles.EndGUI();
+    static void TryPaintVoxel(RaycastHit hit, bool paint) {
+        VoxelChunk chunk = hit.collider.GetComponent<VoxelChunk>();
+        if (!chunk) return;
 
-            if (!toolActive) return;
+        Vector3 local = chunk.transform.InverseTransformPoint(hit.point);
+        int vx = Mathf.FloorToInt(local.x);
+        int vy = Mathf.FloorToInt(local.y);
+        int vz = Mathf.FloorToInt(local.z);
 
-            Event e = Event.current;
-            Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
-            
-            if (Physics.Raycast(ray, out RaycastHit hit, 1000f)) {
-                var chunk = hit.collider.GetComponentInParent<VoxelChunk>();
-                
-                if (chunk != null) {
-                    Vector3 localHit = chunk.transform.InverseTransformPoint(hit.point);
-                    Vector3 localNormal = chunk.transform.InverseTransformDirection(hit.normal);
+        Undo.RegisterCompleteObjectUndo(chunk, paint ? "Paint Voxel" : "Erase Voxel");
 
-                    Vector3 paintPoint = localHit + localNormal * 0.1f;
-                    int px = Mathf.FloorToInt(paintPoint.x);
-                    int py = Mathf.FloorToInt(paintPoint.y);
-                    int pz = Mathf.FloorToInt(paintPoint.z);
+        for (int x = 0; x < brushSize; x++)
+            for (int y = 0; y < brushSize; y++)
+                for (int z = 0; z < brushSize; z++)
+                    chunk.SetVoxel(
+                        vx + x,
+                        vy + y,
+                        vz + z,
+                        paint ? new Voxel { id = (byte)brushMaterialId, color = brushColor } : Voxel.Empty
+                    );
 
-                    Vector3 erasePoint = localHit - localNormal * 0.1f;
-                    int ex = Mathf.FloorToInt(erasePoint.x);
-                    int ey = Mathf.FloorToInt(erasePoint.y);
-                    int ez = Mathf.FloorToInt(erasePoint.z);
-
-                    Vector3 cubeCenter = chunk.transform.TransformPoint(new Vector3(px + 0.5f, py + 0.5f, pz + 0.5f));
-                    Handles.color = new Color(0f, 1f, 0f, 0.4f);
-                    Handles.DrawWireCube(cubeCenter, Vector3.one);
-                    
-                    Handles.color = new Color(0f, 1f, 0f, 0.1f);
-                    Handles.CubeHandleCap(0, cubeCenter, Quaternion.identity, 1f, EventType.Repaint);
-
-                    if (e.type == EventType.MouseDown && e.button == 0) {
-                        Undo.RecordObject(chunk, "Paint Voxel");
-                        Voxel v = new Voxel { 
-                            id = (byte)brushMaterialId, 
-                            color = brushColor 
-                        };
-                        chunk.SetVoxel(px, py, pz, v);
-                        Mesh m = VoxelMeshGenerator.GenerateMesh(chunk);
-                        chunk.ApplyMesh(m);
-                        EditorUtility.SetDirty(chunk);
-                        e.Use();
-                        SceneView.RepaintAll();
-                    } 
-                    else if (e.type == EventType.MouseDown && e.button == 1) {
-                        Undo.RecordObject(chunk, "Erase Voxel");
-                        chunk.SetVoxel(ex, ey, ez, Voxel.Empty);
-                        Mesh m = VoxelMeshGenerator.GenerateMesh(chunk);
-                        chunk.ApplyMesh(m);
-                        EditorUtility.SetDirty(chunk);
-                        e.Use();
-                        SceneView.RepaintAll();
-                    }
-                    
-                    if (e.type == EventType.MouseMove) {
-                        SceneView.RepaintAll();
-                    }
-                }
-            }
-        }
+        Mesh mesh = VoxelMeshGenerator.GenerateMesh(chunk);
+        chunk.ApplyMesh(mesh);
     }
 }

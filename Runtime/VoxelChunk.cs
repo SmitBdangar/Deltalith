@@ -1,67 +1,57 @@
 using UnityEngine;
-using System;
 
-namespace VoxelModeler.Runtime {
-    [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider))]
+namespace Deltalith.Runtime {
+    [System.Serializable]
+    public struct Voxel {
+        public byte id;
+        public Color color;
+
+        public static Voxel Empty => new Voxel { id = 0, color = Color.clear };
+    }
+
     public class VoxelChunk : MonoBehaviour {
         public const int ChunkSize = 32;
-        public Voxel[] voxels;
 
-        [NonSerialized] public MeshFilter meshFilter;
-        [NonSerialized] public MeshRenderer meshRenderer;
-        [NonSerialized] public MeshCollider meshCollider;
+        public Voxel[] voxels = new Voxel[ChunkSize * ChunkSize * ChunkSize];
 
-        void Awake() {
-            InitializeComponents();
-            EnsureArray();
-        }
+        [System.NonSerialized] MeshFilter meshFilter;
+        [System.NonSerialized] MeshRenderer meshRenderer;
+        [System.NonSerialized] MeshCollider meshCollider;
 
-        void Reset() {
-            InitializeComponents();
-            EnsureArray();
-        }
+        void Awake() => InitializeComponents();
 
-        void InitializeComponents() {
-            meshFilter = GetComponent<MeshFilter>();
-            meshRenderer = GetComponent<MeshRenderer>();
-            meshCollider = GetComponent<MeshCollider>();
-            
-            if (meshFilter == null) meshFilter = gameObject.AddComponent<MeshFilter>();
-            if (meshRenderer == null) meshRenderer = gameObject.AddComponent<MeshRenderer>();
-            if (meshCollider == null) meshCollider = gameObject.AddComponent<MeshCollider>();
+        public void InitializeComponents() {
+            if (!meshFilter) meshFilter = GetComponent<MeshFilter>();
+            if (!meshRenderer) meshRenderer = GetComponent<MeshRenderer>();
+            if (!meshCollider) meshCollider = GetComponent<MeshCollider>();
         }
 
         public void EnsureArray() {
-            int len = ChunkSize * ChunkSize * ChunkSize;
-            if (voxels == null || voxels.Length != len) {
-                voxels = new Voxel[len];
-                for (int i = 0; i < len; i++) {
-                    voxels[i] = Voxel.Empty;
-                }
-            }
-        }
-
-        public int Index(int x, int y, int z) {
-            return (y * ChunkSize + z) * ChunkSize + x;
-        }
-
-        public Voxel GetVoxel(int x, int y, int z) {
-            if (x < 0 || y < 0 || z < 0 || x >= ChunkSize || y >= ChunkSize || z >= ChunkSize) {
-                return Voxel.Empty;
-            }
-            return voxels[Index(x, y, z)];
+            if (voxels == null || voxels.Length != ChunkSize * ChunkSize * ChunkSize)
+                voxels = new Voxel[ChunkSize * ChunkSize * ChunkSize];
         }
 
         public void SetVoxel(int x, int y, int z, Voxel v) {
-            if (x < 0 || y < 0 || z < 0 || x >= ChunkSize || y >= ChunkSize || z >= ChunkSize) {
+            if (x < 0 || y < 0 || z < 0 ||
+                x >= ChunkSize || y >= ChunkSize || z >= ChunkSize)
                 return;
-            }
-            voxels[Index(x, y, z)] = v;
+
+            int index = x + ChunkSize * (y + ChunkSize * z);
+            voxels[index] = v;
+        }
+
+        public Voxel GetVoxel(int x, int y, int z) {
+            if (x < 0 || y < 0 || z < 0 ||
+                x >= ChunkSize || y >= ChunkSize || z >= ChunkSize)
+                return Voxel.Empty;
+
+            int index = x + ChunkSize * (y + ChunkSize * z);
+            return voxels[index];
         }
 
         public void ApplyMesh(Mesh mesh) {
             InitializeComponents();
-            
+
             meshFilter.sharedMesh = mesh;
             meshCollider.sharedMesh = mesh;
         }
