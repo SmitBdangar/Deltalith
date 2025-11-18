@@ -1,4 +1,3 @@
-// Assets/Editor/VoxelToolbar.cs
 using UnityEditor;
 using UnityEngine;
 
@@ -11,10 +10,11 @@ namespace VoxelModeler.Editor {
 
         static void OnGUI(SceneView view) {
             Handles.BeginGUI();
-            if (GUI.Button(new Rect(10, 10, 120, 22), "Voxel Brush")) {
-                // toggle tool: the SceneBrushTool already has a toggle button; bring attention
-                Debug.Log("Voxel Brush: toggle visible in SceneView (top-left).");
+            
+            if (GUI.Button(new Rect(10, 10, 140, 25), "Open Voxel Creator")) {
+                VoxelEditorWindow.OpenWindow();
             }
+            
             Handles.EndGUI();
         }
     }
