@@ -1,5 +1,13 @@
 // DeltalithCreatorWindow.cs
 // Place in: DELTALITH/Editor/DeltalithCreatorWindow.cs
+//
+// Clean, stable editor window:
+// - Isolated preview world rendered to a RenderTexture (not the Scene view)
+// - Deterministic 1×1×1 grid on XZ plane where voxels snap perfectly
+// - Safe initialization & RenderTexture lifecycle (no camera-target detach warnings)
+// - Grid rendered as line mesh (MeshTopology.Lines) and always aligned
+// - Hover cube and painting snap to integer voxel coordinates inside chunk bounds
+// - Guards to avoid GUILayout mismatches / NREs
 
 using UnityEditor;
 using UnityEngine;
@@ -11,8 +19,8 @@ namespace Deltalith.Editor
     public class DeltalithCreatorWindow : EditorWindow
     {
         const int DefaultRTSize = 1024;
+        const float RAY_EPSILON = 0.001f;
 
-        // viewport render
         RenderTexture rt;
         Camera previewCamera;
         Light previewLight;
@@ -21,6 +29,11 @@ namespace Deltalith.Editor
         MeshFilter previewMeshFilter;
         MeshRenderer previewMeshRenderer;
         MeshCollider previewMeshCollider;
+
+        // grid object (lines)
+        GameObject gridGO;
+        MeshFilter gridMeshFilter;
+        MeshRenderer gridMeshRenderer;
 
         // camera orbit state
         Vector3 camEuler = new Vector3(30f, -45f, 0f);
@@ -41,7 +54,7 @@ namespace Deltalith.Editor
         // UI scroll
         Vector2 leftPanelScroll;
 
-        // --- Color palette system (Option A: 16 fixed slots) ---
+        // palettes
         const int PaletteSlots = 16;
         Color[] palette = new Color[PaletteSlots];
         Color[] recentColors = new Color[12];
@@ -62,7 +75,12 @@ namespace Deltalith.Editor
         const string PaletteKey = "Deltalith_Palette";
         const string RecentKey = "Deltalith_Recent";
 
-        // lifecycle
+        // viewport rect computed during layout
+        Rect viewportRect;
+
+        // initialization guard
+        bool initialized = false;
+
         [MenuItem("Deltalith/Voxel Creator")]
         public static void OpenWindow()
         {
@@ -74,8 +92,7 @@ namespace Deltalith.Editor
         {
             LoadPalette();
             LoadRecentColors();
-            CreatePreviewObjects(DefaultRTSize, DefaultRTSize);
-            CreatePreviewCube();
+            initialized = false; // lazy init
         }
 
         void OnDisable()
@@ -84,22 +101,39 @@ namespace Deltalith.Editor
             SaveRecentColors();
             DestroyPreviewObjects();
             DestroyPreviewCube();
-            if (rt != null) { rt.Release(); rt = null; }
+            initialized = false;
+        }
+
+        void EnsureInitialized()
+        {
+            if (initialized) return;
+
+            CreatePreviewObjects(DefaultRTSize, DefaultRTSize);
+            CreatePreviewCube();
+            initialized = true;
+        }
+
+        bool SafeToRender()
+        {
+            return initialized &&
+                   previewCamera != null &&
+                   previewRoot != null &&
+                   rt != null &&
+                   previewMeshFilter != null &&
+                   previewCubeMaterial != null &&
+                   previewCubeMesh != null;
         }
 
         void OnGUI()
         {
+            // lazy init: ensures no GUI tries to access preview objects before they exist
+            EnsureInitialized();
+
             EditorGUILayout.BeginHorizontal();
-
-            // Left panel: controls
             DrawLeftPanel();
-
-            // Right panel: viewport
             DrawViewportPanel();
-
             EditorGUILayout.EndHorizontal();
 
-            // repaint continuously while interacting
             if (Event.current.type == EventType.Repaint) Repaint();
         }
 
@@ -107,91 +141,87 @@ namespace Deltalith.Editor
         {
             GUILayout.BeginVertical(GUILayout.Width(300));
             leftPanelScroll = EditorGUILayout.BeginScrollView(leftPanelScroll);
-
-            EditorGUILayout.LabelField("Deltalith Creator", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("Viewport controls: Right-drag rotate, Middle-drag pan, Scroll zoom");
-            EditorGUILayout.Space();
-
-            EditorGUILayout.LabelField("Canvas", EditorStyles.boldLabel);
-            if (GUILayout.Button("New Chunk (Clear)"))
+            try
             {
-                EnsurePreviewChunk();
-                ClearChunk(previewChunk);
-                RegeneratePreviewMesh();
-            }
+                EditorGUILayout.LabelField("Deltalith Creator", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField("Viewport: Right-drag rotate | Middle-drag pan | Scroll zoom");
+                EditorGUILayout.Space();
 
-            EditorGUILayout.LabelField($"Chunk Size: {VoxelChunk.ChunkSize}³");
-
-            EditorGUILayout.Space();
-            // Painting Tools
-            EditorGUILayout.LabelField("Painting Tools", EditorStyles.boldLabel);
-
-            EditorGUI.BeginChangeCheck();
-            paintColor = EditorGUILayout.ColorField("Brush Color", paintColor);
-            if (EditorGUI.EndChangeCheck())
-            {
-                AddRecentColor(paintColor);
-            }
-
-            paintMaterialId = EditorGUILayout.IntField("Material ID", Mathf.Max(1, paintMaterialId));
-            brushSize = EditorGUILayout.IntSlider("Brush Size", brushSize, 1, 8);
-
-            GUILayout.Space(6);
-            if (GUILayout.Button("Clear All"))
-            {
-                EnsurePreviewChunk();
-                Undo.RecordObject(previewChunk, "Clear Chunk");
-                ClearChunk(previewChunk);
-                RegeneratePreviewMesh();
-            }
-
-            if (GUILayout.Button("Generate Mesh"))
-            {
-                EnsurePreviewChunk();
-                RegeneratePreviewMesh();
-            }
-
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Palette", EditorStyles.boldLabel);
-
-            // Draw Palette (16 slots)
-            DrawColorSectionInline(palette, "Palette");
-
-            GUILayout.Space(6);
-            DrawColorSectionInline(recentColors, "Recent");
-
-            GUILayout.Space(6);
-            DrawColorSectionInline(presetColors, "Presets");
-
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("View", EditorStyles.boldLabel);
-            showGrid = EditorGUILayout.ToggleLeft("Show Grid", showGrid);
-            showPreviewCube = EditorGUILayout.ToggleLeft("Show Hover Preview", showPreviewCube);
-
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Export", EditorStyles.boldLabel);
-            if (GUILayout.Button("Export Selected Chunk as Mesh Asset"))
-            {
-                EnsurePreviewChunk();
-                string folder = "Assets/Deltalith/Exports";
-                if (!System.IO.Directory.Exists(folder)) System.IO.Directory.CreateDirectory(folder);
-                string baseName = $"DeltalithChunk_{DateTime.Now:yyyyMMdd_HHmmss}";
-                Mesh mesh = previewMeshFilter.sharedMesh;
-                if (mesh != null)
+                EditorGUILayout.LabelField("Canvas", EditorStyles.boldLabel);
+                if (GUILayout.Button("New Chunk (Clear)"))
                 {
-                    string meshPath = $"{folder}/{baseName}.asset";
-                    AssetDatabase.CreateAsset(Mesh.Instantiate(mesh), meshPath);
-                    AssetDatabase.SaveAssets();
-                    EditorUtility.DisplayDialog("Export", $"Saved mesh asset to {meshPath}", "OK");
+                    EnsurePreviewChunk();
+                    ClearChunk(previewChunk);
+                    RegeneratePreviewMesh();
                 }
-                else EditorUtility.DisplayDialog("Export", "No mesh to export. Generate mesh first.", "OK");
+
+                EditorGUILayout.LabelField($"Chunk Size: {VoxelChunk.ChunkSize}³");
+                EditorGUILayout.Space();
+
+                EditorGUILayout.LabelField("Painting Tools", EditorStyles.boldLabel);
+
+                EditorGUI.BeginChangeCheck();
+                paintColor = EditorGUILayout.ColorField("Brush Color", paintColor);
+                if (EditorGUI.EndChangeCheck()) AddRecentColor(paintColor);
+
+                paintMaterialId = EditorGUILayout.IntField("Material ID", Mathf.Max(1, paintMaterialId));
+                brushSize = EditorGUILayout.IntSlider("Brush Size", brushSize, 1, 8);
+
+                GUILayout.Space(6);
+                if (GUILayout.Button("Clear All"))
+                {
+                    EnsurePreviewChunk();
+                    Undo.RecordObject(previewChunk, "Clear Chunk");
+                    ClearChunk(previewChunk);
+                    RegeneratePreviewMesh();
+                }
+
+                if (GUILayout.Button("Generate Mesh"))
+                {
+                    EnsurePreviewChunk();
+                    RegeneratePreviewMesh();
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Palette", EditorStyles.boldLabel);
+                DrawColorSectionInline(palette, "Palette");
+                GUILayout.Space(6);
+                DrawColorSectionInline(recentColors, "Recent");
+                GUILayout.Space(6);
+                DrawColorSectionInline(presetColors, "Presets");
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("View", EditorStyles.boldLabel);
+                showGrid = EditorGUILayout.ToggleLeft("Show Grid", showGrid);
+                showPreviewCube = EditorGUILayout.ToggleLeft("Show Hover Preview", showPreviewCube);
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Export", EditorStyles.boldLabel);
+                if (GUILayout.Button("Export Selected Chunk as Mesh Asset"))
+                {
+                    EnsurePreviewChunk();
+                    string folder = "Assets/Deltalith/Exports";
+                    if (!System.IO.Directory.Exists(folder)) System.IO.Directory.CreateDirectory(folder);
+                    string baseName = $"DeltalithChunk_{DateTime.Now:yyyyMMdd_HHmmss}";
+                    Mesh mesh = (previewMeshFilter != null) ? previewMeshFilter.sharedMesh : null;
+                    if (mesh != null)
+                    {
+                        string meshPath = $"{folder}/{baseName}.asset";
+                        AssetDatabase.CreateAsset(Mesh.Instantiate(mesh), meshPath);
+                        AssetDatabase.SaveAssets();
+                        EditorUtility.DisplayDialog("Export", $"Saved mesh asset to {meshPath}", "OK");
+                    }
+                    else EditorUtility.DisplayDialog("Export", "No mesh to export. Generate mesh first.", "OK");
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.HelpBox("Left-click in the viewport to paint. Right-click to erase. Blocks snap to a 1×1 grid.", MessageType.Info);
             }
-
-            EditorGUILayout.Space();
-            EditorGUILayout.HelpBox("Left-click in the viewport to paint. Right-click to erase.", MessageType.Info);
-
-            EditorGUILayout.EndScrollView();
-            GUILayout.EndVertical();
+            finally
+            {
+                EditorGUILayout.EndScrollView();
+                GUILayout.EndVertical();
+            }
         }
 
         void DrawColorSectionInline(Color[] colors, string label)
@@ -208,6 +238,7 @@ namespace Deltalith.Editor
                     if (index >= colors.Length)
                     {
                         GUILayout.FlexibleSpace();
+                        index++;
                         continue;
                     }
 
@@ -216,12 +247,6 @@ namespace Deltalith.Editor
                     {
                         paintColor = c;
                         AddRecentColor(c);
-                    }
-
-                    // Ctrl+click to edit palette slot (only for palette array)
-                    if (label == "Palette" && Event.current.type == EventType.MouseDown && Event.current.control)
-                    {
-                        // get rect for last control? Simpler: expose Edit Palette button below instead of complex ctrl-click
                     }
 
                     index++;
@@ -235,18 +260,12 @@ namespace Deltalith.Editor
             Rect r = GUILayoutUtility.GetRect(size, size, GUILayout.Width(size), GUILayout.Height(size));
             EditorGUI.DrawRect(r, c);
 
-            // border
-            Color border = Color.black;
             Handles.BeginGUI();
-            Handles.color = border;
-            Vector3 p1 = new Vector3(r.xMin, r.yMin);
-            Vector3 p2 = new Vector3(r.xMax, r.yMin);
-            Vector3 p3 = new Vector3(r.xMax, r.yMax);
-            Vector3 p4 = new Vector3(r.xMin, r.yMax);
-            Handles.DrawLine(p1, p2);
-            Handles.DrawLine(p2, p3);
-            Handles.DrawLine(p3, p4);
-            Handles.DrawLine(p4, p1);
+            Handles.color = Color.black;
+            Handles.DrawLine(new Vector3(r.xMin, r.yMin), new Vector3(r.xMax, r.yMin));
+            Handles.DrawLine(new Vector3(r.xMax, r.yMin), new Vector3(r.xMax, r.yMax));
+            Handles.DrawLine(new Vector3(r.xMax, r.yMax), new Vector3(r.xMin, r.yMax));
+            Handles.DrawLine(new Vector3(r.xMin, r.yMax), new Vector3(r.xMin, r.yMin));
             Handles.EndGUI();
 
             if (Event.current.type == EventType.MouseDown && r.Contains(Event.current.mousePosition))
@@ -281,7 +300,6 @@ namespace Deltalith.Editor
                 }
                 else
                 {
-                    // initialize sensible default palette spread
                     palette[i] = presetColors[i % presetColors.Length];
                 }
             }
@@ -314,7 +332,6 @@ namespace Deltalith.Editor
 
         void AddRecentColor(Color c)
         {
-            // avoid duplicates: shift only if different from last
             if (recentColors.Length > 0 && recentColors[0] == c) return;
 
             for (int i = recentColors.Length - 1; i > 0; i--)
@@ -326,25 +343,30 @@ namespace Deltalith.Editor
 
         void DrawViewportPanel()
         {
-            Rect r = GUILayoutUtility.GetRect(position.width - 300, position.height, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            if (Event.current.type == EventType.Repaint && (rt == null || rt.width != (int)r.width || rt.height != (int)r.height))
+            // Reserve the viewportRect from layout
+            viewportRect = GUILayoutUtility.GetRect(position.width - 300, position.height, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+
+            // If RT size differs, recreate safely
+            if (Event.current.type == EventType.Repaint && (rt == null || rt.width != (int)viewportRect.width || rt.height != (int)viewportRect.height))
             {
-                int w = Mathf.Max(256, (int)r.width);
-                int h = Mathf.Max(256, (int)r.height);
+                int w = Mathf.Max(256, (int)viewportRect.width);
+                int h = Mathf.Max(256, (int)viewportRect.height);
                 CreatePreviewObjects(w, h);
             }
 
             if (rt != null)
             {
-                GUI.DrawTexture(r, rt, ScaleMode.ScaleToFit, false);
+                GUI.DrawTexture(viewportRect, rt, ScaleMode.ScaleToFit, false);
             }
 
-            ProcessViewportInput(r);
-            RenderPreview(r);
+            ProcessViewportInput(viewportRect);
+            RenderPreview(viewportRect);
         }
 
         void ProcessViewportInput(Rect viewportRect)
         {
+            if (!SafeToRender()) return;
+
             Event e = Event.current;
             Vector2 mouse = e.mousePosition;
 
@@ -353,8 +375,8 @@ namespace Deltalith.Editor
 
             // transform GUI pos to RenderTexture pixel coords
             Vector2 local = mouse - viewportRect.position;
-            float px = (local.x / viewportRect.width) * rt.width;
-            float py = ((viewportRect.height - local.y) / viewportRect.height) * rt.height; // invert y for RT
+            int px = (int)((local.x / viewportRect.width) * rt.width);
+            int py = (int)(((viewportRect.height - local.y) / viewportRect.height) * rt.height); // invert y for RT
 
             // camera control
             if (e.type == EventType.MouseDrag && e.button == 1) // right drag rotate
@@ -383,22 +405,21 @@ namespace Deltalith.Editor
             if (e.type == EventType.MouseDown && (e.button == 0 || e.button == 1))
             {
                 bool paint = (e.button == 0);
-                TryEditVoxelAtPixel((int)px, (int)py, paint);
+                TryEditVoxelAtPixel(px, py, paint);
                 e.Use();
             }
 
             // continuous painting while dragging with left button
             if (e.type == EventType.MouseDrag && e.button == 0)
             {
-                bool paint = true;
-                TryEditVoxelAtPixel((int)px, (int)py, paint);
+                TryEditVoxelAtPixel(px, py, true);
                 e.Use();
             }
         }
 
         void RenderPreview(Rect viewportRect)
         {
-            if (previewCamera == null || rt == null) return;
+            if (!SafeToRender()) return;
 
             // update camera transform from orbit parameters
             Quaternion rot = Quaternion.Euler(camEuler);
@@ -411,12 +432,12 @@ namespace Deltalith.Editor
             previewCamera.aspect = (float)rt.width / rt.height;
             previewCamera.Render();
 
-            // draw preview cube overlay using Graphics.DrawMesh in preview camera
+            // draw hover cube in preview camera (snapped)
             if (showPreviewCube)
             {
                 if (ComputeHoverVoxelWorld(out Vector3 hoverPos))
                 {
-                    Matrix4x4 mat = Matrix4x4.TRS(previewRoot.transform.TransformPoint(hoverPos + Vector3.one * 0.0f), Quaternion.identity, Vector3.one * 1.0f);
+                    Matrix4x4 mat = Matrix4x4.TRS(previewRoot.transform.TransformPoint(hoverPos + Vector3.one * 0.5f), Quaternion.identity, Vector3.one);
                     Color c = paintColor;
                     c.a = 0.45f;
                     previewCubeMaterial.SetColor("_Color", c);
@@ -425,38 +446,58 @@ namespace Deltalith.Editor
             }
         }
 
+        Ray RayFromViewportPixel(int px, int py)
+        {
+            // returns a ray in world space from camera for RT pixel coords (origin bottom-left)
+            if (!SafeToRender())
+                return new Ray(Vector3.zero, Vector3.forward);
+
+            float nx = px / (float)rt.width;
+            float ny = py / (float)rt.height;
+            return previewCamera.ViewportPointToRay(new Vector3(nx, ny, 0f));
+        }
+
         bool ComputeHoverVoxelWorld(out Vector3 hoverPos)
         {
             hoverPos = Vector3.zero;
+            if (!SafeToRender()) return false;
+
             Vector2 windowMouse = Event.current.mousePosition;
-            Rect vpRect = new Rect(300, 0, position.width - 300, position.height); // approximate viewport position relative to window
-            if (!vpRect.Contains(windowMouse)) return false;
-            Vector2 local = windowMouse - vpRect.position;
-            float px = (local.x / vpRect.width) * rt.width;
-            float py = ((vpRect.height - local.y) / vpRect.height) * rt.height;
-            Ray ray = previewCamera.ScreenPointToRay(new Vector3(px, py, 0));
+            if (!viewportRect.Contains(windowMouse)) return false;
+            Vector2 local = windowMouse - viewportRect.position;
+            int px = (int)((local.x / viewportRect.width) * rt.width);
+            int py = (int)(((viewportRect.height - local.y) / viewportRect.height) * rt.height);
+
+            Ray ray = RayFromViewportPixel(px, py);
             Ray localRay = new Ray(previewRoot.transform.InverseTransformPoint(ray.origin), previewRoot.transform.InverseTransformDirection(ray.direction));
-            if (!RayAABBIntersection(localRay, Vector3.zero, Vector3.one * VoxelChunk.ChunkSize, out float enter, out float exit)) return false;
-            Vector3 hitPoint = localRay.origin + localRay.direction * enter;
+
+            if (!RayAABBIntersection(localRay, Vector3.zero, Vector3.one * VoxelChunk.ChunkSize, out float enter, out float exit))
+                return false;
+
+            Vector3 hitPoint = localRay.origin + localRay.direction * (enter + RAY_EPSILON);
             int vx = Mathf.FloorToInt(hitPoint.x);
             int vy = Mathf.FloorToInt(hitPoint.y);
             int vz = Mathf.FloorToInt(hitPoint.z);
-            if (vx < 0 || vy < 0 || vz < 0 || vx >= VoxelChunk.ChunkSize || vy >= VoxelChunk.ChunkSize || vz >= VoxelChunk.ChunkSize) return false;
+
+            if (vx < 0 || vy < 0 || vz < 0 || vx >= VoxelChunk.ChunkSize || vy >= VoxelChunk.ChunkSize || vz >= VoxelChunk.ChunkSize)
+                return false;
+
             hoverPos = new Vector3(vx, vy, vz);
             return true;
         }
 
         void TryEditVoxelAtPixel(int px, int py, bool paint)
         {
+            if (!SafeToRender()) return;
             EnsurePreviewChunk();
-            Vector3 pixel = new Vector3(px, py, 0);
-            Ray ray = previewCamera.ScreenPointToRay(pixel);
 
+            Ray ray = RayFromViewportPixel(px, py);
             Ray localRay = new Ray(previewRoot.transform.InverseTransformPoint(ray.origin), previewRoot.transform.InverseTransformDirection(ray.direction));
 
-            if (!RayAABBIntersection(localRay, Vector3.zero, Vector3.one * VoxelChunk.ChunkSize, out float enter, out float exit)) return;
+            if (!RayAABBIntersection(localRay, Vector3.zero, Vector3.one * VoxelChunk.ChunkSize, out float enter, out float exit))
+                return;
 
-            Vector3 hitPoint = localRay.origin + localRay.direction * enter;
+            Vector3 hitPoint = localRay.origin + localRay.direction * (enter + RAY_EPSILON);
             int vx = Mathf.FloorToInt(hitPoint.x);
             int vy = Mathf.FloorToInt(hitPoint.y);
             int vz = Mathf.FloorToInt(hitPoint.z);
@@ -492,16 +533,10 @@ namespace Deltalith.Editor
 
         void RegeneratePreviewMesh()
         {
-            if (previewChunk == null) return;
+            if (previewChunk == null || previewMeshFilter == null) return;
             Mesh m = VoxelMeshGenerator.GenerateMesh(previewChunk);
-            if (previewMeshFilter != null)
-            {
-                previewMeshFilter.sharedMesh = m;
-            }
-            if (previewMeshCollider != null)
-            {
-                previewMeshCollider.sharedMesh = m;
-            }
+            previewMeshFilter.sharedMesh = m;
+            if (previewMeshCollider != null) previewMeshCollider.sharedMesh = m;
         }
 
         static bool RayAABBIntersection(Ray r, Vector3 boxMin, Vector3 boxMax, out float tmin, out float tmax)
@@ -541,6 +576,7 @@ namespace Deltalith.Editor
 
         void ClearChunk(VoxelChunk chunk)
         {
+            if (chunk == null) return;
             chunk.EnsureArray();
             for (int i = 0; i < chunk.voxels.Length; i++) chunk.voxels[i] = Voxel.Empty;
             RegeneratePreviewMesh();
@@ -548,34 +584,41 @@ namespace Deltalith.Editor
 
         void CreatePreviewObjects(int width, int height)
         {
+            // Detach camera from old RT before destroying
+            if (previewCamera != null)
+                previewCamera.targetTexture = null;
+
             if (rt != null)
             {
                 rt.Release();
                 DestroyImmediate(rt);
+                rt = null;
             }
 
             rt = new RenderTexture(width, height, 24, RenderTextureFormat.DefaultHDR);
             rt.Create();
 
+            // root object
             if (previewRoot == null)
             {
                 previewRoot = new GameObject("DeltalithPreviewRoot");
                 previewRoot.hideFlags = HideFlags.HideAndDontSave;
             }
 
-            if (previewChunk == null)
-            {
-                previewChunk = previewRoot.GetComponent<VoxelChunk>();
-                if (previewChunk == null) previewChunk = previewRoot.AddComponent<VoxelChunk>();
-            }
+            // ensure required components
+            if (!previewRoot.TryGetComponent<VoxelChunk>(out previewChunk))
+                previewChunk = previewRoot.AddComponent<VoxelChunk>();
 
-            previewMeshFilter = previewRoot.GetComponent<MeshFilter>();
-            if (previewMeshFilter == null) previewMeshFilter = previewRoot.AddComponent<MeshFilter>();
-            previewMeshRenderer = previewRoot.GetComponent<MeshRenderer>();
-            if (previewMeshRenderer == null) previewMeshRenderer = previewRoot.AddComponent<MeshRenderer>();
-            previewMeshCollider = previewRoot.GetComponent<MeshCollider>();
-            if (previewMeshCollider == null) previewMeshCollider = previewRoot.AddComponent<MeshCollider>();
+            if (!previewRoot.TryGetComponent<MeshFilter>(out previewMeshFilter))
+                previewMeshFilter = previewRoot.AddComponent<MeshFilter>();
 
+            if (!previewRoot.TryGetComponent<MeshRenderer>(out previewMeshRenderer))
+                previewMeshRenderer = previewRoot.AddComponent<MeshRenderer>();
+
+            if (!previewRoot.TryGetComponent<MeshCollider>(out previewMeshCollider))
+                previewMeshCollider = previewRoot.AddComponent<MeshCollider>();
+
+            // make sure mesh renderer has a simple material
             if (previewMeshRenderer.sharedMaterial == null)
             {
                 var mat = new Material(Shader.Find("Standard"));
@@ -583,6 +626,7 @@ namespace Deltalith.Editor
                 previewMeshRenderer.sharedMaterial = mat;
             }
 
+            // camera
             if (previewCamera == null)
             {
                 GameObject camGo = new GameObject("DeltalithPreviewCamera");
@@ -594,6 +638,7 @@ namespace Deltalith.Editor
                 previewCamera.nearClipPlane = 0.01f;
             }
 
+            // light
             if (previewLight == null)
             {
                 GameObject lightGo = new GameObject("DeltalithPreviewLight");
@@ -604,6 +649,10 @@ namespace Deltalith.Editor
                 previewLight.transform.rotation = Quaternion.Euler(50, -30, 0);
             }
 
+            // grid object (lines drawn on XZ plane)
+            CreateOrUpdateGridMesh();
+
+            // reset transforms / camera defaults
             previewRoot.transform.position = Vector3.zero;
             previewRoot.transform.rotation = Quaternion.identity;
             previewRoot.transform.localScale = Vector3.one;
@@ -614,12 +663,103 @@ namespace Deltalith.Editor
 
             previewCamera.targetTexture = rt;
             previewCamera.aspect = (float)rt.width / rt.height;
+
+            // ensure chunk has array and mesh reflects it
+            previewChunk.EnsureArray();
+            RegeneratePreviewMesh();
+        }
+
+        void CreateOrUpdateGridMesh()
+        {
+            // grid GO is child of previewRoot so it follows the preview root transform
+            if (gridGO == null)
+            {
+                gridGO = new GameObject("DeltalithGrid");
+                gridGO.hideFlags = HideFlags.HideAndDontSave;
+                gridGO.transform.parent = previewRoot.transform;
+                gridGO.transform.localPosition = Vector3.zero;
+                gridGO.transform.localRotation = Quaternion.identity;
+            }
+
+            if (!gridGO.TryGetComponent<MeshFilter>(out gridMeshFilter))
+                gridMeshFilter = gridGO.AddComponent<MeshFilter>();
+
+            if (!gridGO.TryGetComponent<MeshRenderer>(out gridMeshRenderer))
+                gridMeshRenderer = gridGO.AddComponent<MeshRenderer>();
+
+            // simple unlit color material for grid
+            if (gridMeshRenderer.sharedMaterial == null)
+            {
+                var mat = new Material(Shader.Find("Unlit/Color"));
+                if (mat == null)
+                {
+                    // fallback to Standard if Unlit/Color not available
+                    mat = new Material(Shader.Find("Standard"));
+                }
+                mat.SetColor("_Color", new Color(0.6f, 0.6f, 0.6f, 1f));
+                gridMeshRenderer.sharedMaterial = mat;
+            }
+
+            // Build a lines mesh on XZ plane from (0..ChunkSize)
+            int size = VoxelChunk.ChunkSize;
+            float spacing = 1f;
+            int lineCount = (size + 1) * 2;
+            int vertsCount = lineCount * 2;
+
+            Vector3[] verts = new Vector3[vertsCount];
+            int[] indices = new int[vertsCount];
+
+            int idx = 0;
+            // lines along X (vary Z)
+            for (int z = 0; z <= size; z++)
+            {
+                verts[idx] = new Vector3(0f, 0f, z * spacing);
+                indices[idx] = idx;
+                idx++;
+                verts[idx] = new Vector3(size * spacing, 0f, z * spacing);
+                indices[idx] = idx;
+                idx++;
+            }
+            // lines along Z (vary X)
+            for (int x = 0; x <= size; x++)
+            {
+                verts[idx] = new Vector3(x * spacing, 0f, 0f);
+                indices[idx] = idx;
+                idx++;
+                verts[idx] = new Vector3(x * spacing, 0f, size * spacing);
+                indices[idx] = idx;
+                idx++;
+            }
+
+            Mesh mesh = gridMeshFilter.sharedMesh;
+            if (mesh == null) mesh = new Mesh();
+            else mesh.Clear();
+
+            mesh.name = "DeltalithGridMesh";
+            mesh.vertices = verts;
+            mesh.SetIndices(indices, MeshTopology.Lines, 0);
+            mesh.RecalculateBounds();
+            gridMeshFilter.sharedMesh = mesh;
+
+            // grid should not receive shadows etc
+            gridMeshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            gridMeshRenderer.receiveShadows = false;
         }
 
         void DestroyPreviewObjects()
         {
+            // detach camera from RT before destroying
+            if (previewCamera != null)
+                previewCamera.targetTexture = null;
+
             if (previewCamera != null) DestroyImmediate(previewCamera.gameObject);
             if (previewLight != null) DestroyImmediate(previewLight.gameObject);
+
+            if (gridGO != null) DestroyImmediate(gridGO);
+            gridGO = null;
+            gridMeshFilter = null;
+            gridMeshRenderer = null;
+
             if (previewRoot != null) DestroyImmediate(previewRoot);
             previewCamera = null;
             previewLight = null;
@@ -628,6 +768,13 @@ namespace Deltalith.Editor
             previewMeshFilter = null;
             previewMeshRenderer = null;
             previewMeshCollider = null;
+
+            if (rt != null)
+            {
+                rt.Release();
+                DestroyImmediate(rt);
+                rt = null;
+            }
         }
 
         void CreatePreviewCube()
@@ -648,7 +795,7 @@ namespace Deltalith.Editor
             previewCubeMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             previewCubeMaterial.SetInt("_ZWrite", 0);
             previewCubeMaterial.DisableKeyword("_ALPHATEST_ON");
-            previewCubeMaterial.EnableKeyword("_ALPHABLEND_ON");
+            previewCubeMaterial.EnableKeyword("_ALPHBLEND_ON");
             previewCubeMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             previewCubeMaterial.renderQueue = 3000;
         }
@@ -659,8 +806,5 @@ namespace Deltalith.Editor
             previewCubeMaterial = null;
             previewCubeMesh = null;
         }
-
-
-
     }
 }
