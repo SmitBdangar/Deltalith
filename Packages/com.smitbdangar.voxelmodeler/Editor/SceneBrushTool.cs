@@ -1,4 +1,3 @@
-// Assets/Editor/SceneBrushTool.cs
 using UnityEditor;
 using UnityEngine;
 using VoxelModeler.Runtime;
