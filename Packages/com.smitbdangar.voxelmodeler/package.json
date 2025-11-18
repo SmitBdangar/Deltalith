@@ -8,9 +8,7 @@
     "name": "Smit B Dangar",
     "url": "https://github.com/SmitBdanger"
   },
-  "dependencies": {
-    "com.unity.formats.fbx": "4.1.0"
-  },
+  "dependencies": {},
   "keywords": [
     "voxel",
     "modeling",
