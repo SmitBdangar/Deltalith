@@ -1,20 +1,25 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace VoxelModeler.Editor {
+namespace Deltalith.Editor
+{
     [InitializeOnLoad]
-    public static class VoxelToolbar {
-        static VoxelToolbar() {
+    public static class VoxelToolbar
+    {
+        static VoxelToolbar()
+        {
             SceneView.duringSceneGui += OnGUI;
         }
 
-        static void OnGUI(SceneView view) {
+        static void OnGUI(SceneView view)
+        {
             Handles.BeginGUI();
-            
-            if (GUI.Button(new Rect(10, 10, 140, 25), "Open Voxel Creator")) {
+
+            if (GUI.Button(new Rect(10, 10, 140, 25), "Open Voxel Creator"))
+            {
                 VoxelEditorWindow.OpenWindow();
             }
-            
+
             Handles.EndGUI();
         }
     }

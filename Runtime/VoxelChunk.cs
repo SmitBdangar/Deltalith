@@ -1,15 +1,24 @@
 using UnityEngine;
 
-namespace Deltalith.Runtime {
+namespace Deltalith.Runtime
+{
     [System.Serializable]
-    public struct Voxel {
+    public struct Voxel
+    {
         public byte id;
-        public Color color;
+        public Color32 color;
 
-        public static Voxel Empty => new Voxel { id = 0, color = Color.clear };
+        public static Voxel Empty => new Voxel
+        {
+            id = 0,
+            color = new Color32(0, 0, 0, 0)
+        };
+
+        public bool IsEmpty => id == 0;
     }
 
-    public class VoxelChunk : MonoBehaviour {
+    public class VoxelChunk : MonoBehaviour
+    {
         public const int ChunkSize = 32;
 
         public Voxel[] voxels = new Voxel[ChunkSize * ChunkSize * ChunkSize];
@@ -20,18 +29,21 @@ namespace Deltalith.Runtime {
 
         void Awake() => InitializeComponents();
 
-        public void InitializeComponents() {
+        public void InitializeComponents()
+        {
             if (!meshFilter) meshFilter = GetComponent<MeshFilter>();
             if (!meshRenderer) meshRenderer = GetComponent<MeshRenderer>();
             if (!meshCollider) meshCollider = GetComponent<MeshCollider>();
         }
 
-        public void EnsureArray() {
+        public void EnsureArray()
+        {
             if (voxels == null || voxels.Length != ChunkSize * ChunkSize * ChunkSize)
                 voxels = new Voxel[ChunkSize * ChunkSize * ChunkSize];
         }
 
-        public void SetVoxel(int x, int y, int z, Voxel v) {
+        public void SetVoxel(int x, int y, int z, Voxel v)
+        {
             if (x < 0 || y < 0 || z < 0 ||
                 x >= ChunkSize || y >= ChunkSize || z >= ChunkSize)
                 return;
@@ -40,7 +52,8 @@ namespace Deltalith.Runtime {
             voxels[index] = v;
         }
 
-        public Voxel GetVoxel(int x, int y, int z) {
+        public Voxel GetVoxel(int x, int y, int z)
+        {
             if (x < 0 || y < 0 || z < 0 ||
                 x >= ChunkSize || y >= ChunkSize || z >= ChunkSize)
                 return Voxel.Empty;
@@ -49,7 +62,8 @@ namespace Deltalith.Runtime {
             return voxels[index];
         }
 
-        public void ApplyMesh(Mesh mesh) {
+        public void ApplyMesh(Mesh mesh)
+        {
             InitializeComponents();
 
             meshFilter.sharedMesh = mesh;
