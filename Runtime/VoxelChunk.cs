@@ -46,7 +46,7 @@ namespace Deltalith.Runtime
             int index = x + ChunkSize * (y + ChunkSize * z);
             return voxels[index];
         }
-
+        
         public void ApplyMesh(Mesh mesh)
         {
             InitializeComponents();
