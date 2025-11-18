@@ -1,7 +1,8 @@
 {
-  "name": "VoxelModeler.Editor",
+  "name": "Deltalith.Editor",
+  "rootNamespace": "Deltalith.Editor",
   "references": [
-    "VoxelModeler.Runtime"
+    "Deltalith.Runtime"
   ],
   "includePlatforms": [
     "Editor"

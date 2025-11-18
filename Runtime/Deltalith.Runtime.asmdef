@@ -1,5 +1,6 @@
 {
-  "name": "VoxelModeler.Runtime",
+  "name": "Deltalith.Runtime",
+  "rootNamespace": "Deltalith.Runtime",
   "references": [],
   "includePlatforms": [],
   "excludePlatforms": [],
