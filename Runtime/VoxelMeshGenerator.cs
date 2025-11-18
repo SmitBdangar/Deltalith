@@ -170,7 +170,7 @@ namespace Deltalith.Runtime
                                 world[axisU] = u + baseCorner[axisU] * width;
                                 world[axisV] = v + baseCorner[axisV] * height;
                                 world[axisW] = pos[axisW] + (baseCorner[axisW] > 0.5f ? 0 : -1);
-
+                                
                                 quad[c] = world;
                             }
 
