@@ -39,7 +39,7 @@ namespace VoxelModeler.Editor {
                     EditorSceneManager.MarkSceneDirty(currentChunk.gameObject.scene);
                 }
 
-                if (GUILayout.Button("Generate Mesh (sync)")) {
+                if (GUILayout.Button("Generate Mesh")) {
                     Mesh mesh = VoxelMeshGenerator.GenerateMesh(currentChunk);
                     currentChunk.ApplyMesh(mesh);
                     EditorSceneManager.MarkSceneDirty(currentChunk.gameObject.scene);
@@ -51,7 +51,7 @@ namespace VoxelModeler.Editor {
             }
 
             GUILayout.Space(10);
-            EditorGUILayout.HelpBox("Use the Scene toolbar 'Voxel Brush' button to paint voxels in SceneView.", MessageType.Info);
+            EditorGUILayout.HelpBox("Use 'Voxel Brush Toggle' button in SceneView to paint. Left-click paints, right-click erases.", MessageType.Info);
         }
 
         void CreateChunk() {
@@ -59,10 +59,14 @@ namespace VoxelModeler.Editor {
             var vc = go.AddComponent<VoxelChunk>();
             var mf = go.GetComponent<MeshFilter>();
             var mr = go.GetComponent<MeshRenderer>();
-            // try to assign default material if exists
+            // FIXED: Also add MeshCollider by default
+            var mc = go.AddComponent<MeshCollider>();
+            
             Material mat = AssetDatabase.LoadAssetAtPath<Material>(defaultMaterialPath);
             if (mat != null) mr.sharedMaterial = mat;
+            
             Selection.activeGameObject = go;
+            Undo.RegisterCreatedObjectUndo(go, "Create Voxel Chunk");
         }
 
         void ClearChunk(VoxelChunk chunk) {
@@ -78,7 +82,7 @@ namespace VoxelModeler.Editor {
                 for (int y = 0; y < VoxelChunk.ChunkSize; y++) {
                     for (int z = 0; z < VoxelChunk.ChunkSize; z++) {
                         if (r.NextDouble() < 0.12) {
-                            Voxel v = new Voxel { id = (byte)UnityEngine.Random.Range(1, 4), color = paintColor };
+                            Voxel v = new Voxel { id = (byte)Random.Range(1, 4), color = paintColor };
                             chunk.SetVoxel(x, y, z, v);
                         } else {
                             chunk.SetVoxel(x, y, z, Voxel.Empty);
@@ -99,7 +103,6 @@ namespace VoxelModeler.Editor {
                 return;
             }
 
-            // create a temporary GameObject to hold mesh + renderer for export
             GameObject tmp = new GameObject(chunk.name + "_FBXExport");
             var mf2 = tmp.AddComponent<MeshFilter>();
             var mr2 = tmp.AddComponent<MeshRenderer>();
@@ -107,7 +110,6 @@ namespace VoxelModeler.Editor {
             mr2.sharedMaterials = mr != null ? mr.sharedMaterials : new Material[] { };
 
 #if UNITY_2018_3_OR_NEWER
-            // Use FBX Exporter if available
             var type = System.Type.GetType("UnityEditor.Formats.Fbx.Exporter.ModelExporter, Unity.Formats.Fbx.Editor");
             if (type != null) {
                 try {
@@ -118,10 +120,10 @@ namespace VoxelModeler.Editor {
                     Debug.LogError("FBX export failed: " + e.Message);
                 }
             } else {
-                Debug.LogError("FBX Exporter package not found. Install 'com.unity.formats.fbx' to enable FBX export.");
+                Debug.LogError("FBX Exporter package not found. Install 'com.unity.formats.fbx' via Package Manager.");
             }
 #else
-            Debug.LogError("FBX Export is supported on Unity 2018.3+ with the FBX package.");
+            Debug.LogError("FBX Export requires Unity 2018.3+ with the FBX Exporter package.");
 #endif
             GameObject.DestroyImmediate(tmp);
         }
