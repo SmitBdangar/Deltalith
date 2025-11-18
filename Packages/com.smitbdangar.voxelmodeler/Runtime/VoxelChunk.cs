@@ -10,16 +10,19 @@ namespace VoxelModeler.Runtime {
 
         [NonSerialized] public MeshFilter meshFilter;
         [NonSerialized] public MeshRenderer meshRenderer;
+        [NonSerialized] public MeshCollider meshCollider;
 
         void Awake() {
             meshFilter = GetComponent<MeshFilter>();
             meshRenderer = GetComponent<MeshRenderer>();
+            meshCollider = GetComponent<MeshCollider>();
             EnsureArray();
         }
 
         void Reset() {
             meshFilter = GetComponent<MeshFilter>();
             meshRenderer = GetComponent<MeshRenderer>();
+            meshCollider = GetComponent<MeshCollider>();
             EnsureArray();
         }
 
@@ -46,9 +49,15 @@ namespace VoxelModeler.Runtime {
         public void ApplyMesh(Mesh mesh) {
             meshFilter = GetComponent<MeshFilter>();
             meshRenderer = GetComponent<MeshRenderer>();
+            meshCollider = GetComponent<MeshCollider>();
+            
             if (meshFilter == null) meshFilter = gameObject.AddComponent<MeshFilter>();
             if (meshRenderer == null) meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            if (meshCollider == null) meshCollider = gameObject.AddComponent<MeshCollider>();
+            
             meshFilter.sharedMesh = mesh;
+            // CRITICAL FIX: Update collider so raycasting works
+            meshCollider.sharedMesh = mesh;
         }
     }
 }
