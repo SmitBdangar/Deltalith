@@ -1,5 +1,5 @@
 {
-  "name": "com.smitbdangar.voxelmodeler",
+  "name": "com.smitbdangar.deltalith",
   "version": "1.0.0",
   "displayName": "Voxel Creator",
   "description": "Unity Editor voxel modeling tool with greedy meshing, painting tools, and multi-format export (FBX, OBJ, Prefab).",
@@ -7,6 +7,10 @@
   "author": {
     "name": "Smit B Dangar",
     "url": "https://github.com/SmitBdanger"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SmitBdanger/Deltalith.git"
   },
   "dependencies": {},
   "keywords": [
@@ -17,35 +21,8 @@
     "obj",
     "editor",
     "creator",
-    "3d"
-  ],
-  "samples": [
-    {
-      "displayName": "Basic Example",
-      "description": "Example scene showing voxel chunk and painting tools.",
-      "path": "Samples~/BasicExample"
-    }
-  ]
-}{
-  "name": "com.smitbdangar.voxelmodeler",
-  "version": "1.0.0",
-  "displayName": "Voxel Creator",
-  "description": "Unity Editor voxel modeling tool with greedy meshing, painting tools, and multi-format export (FBX, OBJ, Prefab).",
-  "unity": "2020.3",
-  "author": {
-    "name": "Smit B Dangar",
-    "url": "https://github.com/SmitBdanger"
-  },
-  "dependencies": {},
-  "keywords": [
-    "voxel",
-    "modeling",
-    "mesh",
-    "fbx",
-    "obj",
-    "editor",
-    "creator",
-    "3d"
+    "3d",
+    "deltalith"
   ],
   "samples": [
     {
