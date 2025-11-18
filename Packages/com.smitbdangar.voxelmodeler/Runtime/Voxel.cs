@@ -1,4 +1,3 @@
-// Assets/Runtime/Voxel.cs
 using UnityEngine;
 
 namespace VoxelModeler.Runtime {
