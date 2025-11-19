@@ -14,8 +14,7 @@ External modeling tools break up your workflow. This extension provides a seamle
 * **Vertex Color / Palette Support:** Assign colors to individual cubes before placement, with colors baked directly into the final mesh.
 * **Intelligent Mesh Generation:** The export process includes **automatic face culling** to remove hidden (internal) faces, significantly reducing the polygon count for fast rendering.
 * **Asset Pipeline Integration:** Exports a clean `.asset` file, ready to be assigned to any MeshFilter component in your game.
-
-[Optional: Add a GIF or Screenshot showing the tool in action here]
+  
 
 ## 💡 Contribution
 
