@@ -53,5 +53,15 @@ namespace Deltalith.Runtime
             meshFilter.sharedMesh = mesh;
             meshCollider.sharedMesh = mesh;
         }
+
+        public bool IsEmpty()
+        {
+            EnsureArray();
+            for (int i = 0; i < voxels.Length; i++)
+            {
+                if (!voxels[i].IsEmpty) return false;
+            }
+            return true;
+        }
     }
 }

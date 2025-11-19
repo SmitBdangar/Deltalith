@@ -1,13 +1,11 @@
 // DeltalithCreatorWindow.cs
 // Place in: DELTALITH/Editor/DeltalithCreatorWindow.cs
 //
-// Clean, stable editor window:
-// - Isolated preview world rendered to a RenderTexture (not the Scene view)
-// - Deterministic 1×1×1 grid on XZ plane where voxels snap perfectly
-// - Safe initialization & RenderTexture lifecycle (no camera-target detach warnings)
-// - Grid rendered as line mesh (MeshTopology.Lines) and always aligned
-// - Hover cube and painting snap to integer voxel coordinates inside chunk bounds
-// - Guards to avoid GUILayout mismatches / NREs
+// This is the original file with changes to enforce:
+// - 128x128x128 chunk (uses VoxelChunk.ChunkSize already changed)
+// - Placement area and adjacency rules (can place in air only if connected by face/edge/corner)
+// - First placed block must be on bottom (y == 0)
+// - Grid generation uses VoxelChunk.ChunkSize so remains consistent
 
 using UnityEditor;
 using UnityEngine;
@@ -215,7 +213,7 @@ namespace Deltalith.Editor
                 }
 
                 EditorGUILayout.Space();
-                EditorGUILayout.HelpBox("Left-click in the viewport to paint. Right-click to erase. Blocks snap to a 1×1 grid.", MessageType.Info);
+                EditorGUILayout.HelpBox("Left-click in the viewport to paint. Right-click to erase. Blocks snap to a 1×1 grid. Placement requires adjacency (face/edge/corner) except the very first block which must be on the bottom (y=0). Build area is constrained to the chunk bounds.", MessageType.Info);
             }
             finally
             {
@@ -462,29 +460,84 @@ namespace Deltalith.Editor
             hoverPos = Vector3.zero;
             if (!SafeToRender()) return false;
 
+            // Convert GUI position to RT pixel coords
             Vector2 windowMouse = Event.current.mousePosition;
             if (!viewportRect.Contains(windowMouse)) return false;
+
             Vector2 local = windowMouse - viewportRect.position;
             int px = (int)((local.x / viewportRect.width) * rt.width);
             int py = (int)(((viewportRect.height - local.y) / viewportRect.height) * rt.height);
 
             Ray ray = RayFromViewportPixel(px, py);
-            Ray localRay = new Ray(previewRoot.transform.InverseTransformPoint(ray.origin), previewRoot.transform.InverseTransformDirection(ray.direction));
+            Ray localRay = new Ray(
+                previewRoot.transform.InverseTransformPoint(ray.origin),
+                previewRoot.transform.InverseTransformDirection(ray.direction)
+            );
 
-            if (!RayAABBIntersection(localRay, Vector3.zero, Vector3.one * VoxelChunk.ChunkSize, out float enter, out float exit))
+            if (!RayAABBIntersection(localRay, Vector3.zero, Vector3.one * VoxelChunk.ChunkSize, out float enter, out _))
                 return false;
 
             Vector3 hitPoint = localRay.origin + localRay.direction * (enter + RAY_EPSILON);
-            int vx = Mathf.FloorToInt(hitPoint.x);
-            int vy = Mathf.FloorToInt(hitPoint.y);
-            int vz = Mathf.FloorToInt(hitPoint.z);
 
-            if (vx < 0 || vy < 0 || vz < 0 || vx >= VoxelChunk.ChunkSize || vy >= VoxelChunk.ChunkSize || vz >= VoxelChunk.ChunkSize)
+            // SNAP PERFECTLY TO GRID
+            int vx = Mathf.FloorToInt(hitPoint.x + 0.5f);
+            int vy = Mathf.FloorToInt(hitPoint.y + 0.5f);
+            int vz = Mathf.FloorToInt(hitPoint.z + 0.5f);
+
+            // OUT OF BOUNDS → NO HOVER
+            if (vx < 0 || vy < 0 || vz < 0 ||
+                vx >= VoxelChunk.ChunkSize ||
+                vy >= VoxelChunk.ChunkSize ||
+                vz >= VoxelChunk.ChunkSize)
                 return false;
+
+            bool isFirstBlock = previewChunk.IsEmpty();
+
+            // FIRST BLOCK MUST BE ON FLOOR
+            if (isFirstBlock)
+            {
+                if (vy != 0)
+                    return false;
+            }
+            else
+            {
+                // REQUIRE ADJACENCY FOR HOVER (face, edge, corner)
+                if (!HasAdjacentVoxel(vx, vy, vz))
+                    return false;
+            }
 
             hoverPos = new Vector3(vx, vy, vz);
             return true;
         }
+
+        bool HasAdjacentVoxel(int x, int y, int z)
+        {
+            for (int nx = -1; nx <= 1; nx++)
+            {
+                for (int ny = -1; ny <= 1; ny++)
+                {
+                    for (int nz = -1; nz <= 1; nz++)
+                    {
+                        if (nx == 0 && ny == 0 && nz == 0) continue;
+
+                        int cx = x + nx;
+                        int cy = y + ny;
+                        int cz = z + nz;
+
+                        if (cx < 0 || cy < 0 || cz < 0 ||
+                            cx >= VoxelChunk.ChunkSize ||
+                            cy >= VoxelChunk.ChunkSize ||
+                            cz >= VoxelChunk.ChunkSize)
+                            continue;
+
+                        if (!previewChunk.GetVoxel(cx, cy, cz).IsEmpty)
+                            return true;
+                    }
+                }
+            }
+            return false;
+        }
+
 
         void TryEditVoxelAtPixel(int px, int py, bool paint)
         {
@@ -498,9 +551,53 @@ namespace Deltalith.Editor
                 return;
 
             Vector3 hitPoint = localRay.origin + localRay.direction * (enter + RAY_EPSILON);
-            int vx = Mathf.FloorToInt(hitPoint.x);
-            int vy = Mathf.FloorToInt(hitPoint.y);
-            int vz = Mathf.FloorToInt(hitPoint.z);
+
+            // Snap to exact grid cell
+            int vx = Mathf.FloorToInt(hitPoint.x + 0.5f);
+            int vy = Mathf.FloorToInt(hitPoint.y + 0.5f);
+            int vz = Mathf.FloorToInt(hitPoint.z + 0.5f);
+
+            // enforce chunk bounds (build area)
+            if (vx < 0 || vz < 0 || vx >= VoxelChunk.ChunkSize || vz >= VoxelChunk.ChunkSize)
+                return;
+            if (vy < 0 || vy >= VoxelChunk.ChunkSize)
+                return;
+
+            // First block must be at bottom layer (y == 0).
+            bool isFirstBlock = previewChunk.IsEmpty();
+
+            if (isFirstBlock && paint)
+            {
+                if (vy != 0)
+                    return; // only allow initial placement on bottom layer
+            }
+
+            // If not first block and painting, require connectivity (face/edge/corner) to existing voxel
+            if (paint && !isFirstBlock)
+            {
+                bool hasNeighbor = false;
+                for (int nx = -1; nx <= 1 && !hasNeighbor; nx++)
+                {
+                    for (int ny = -1; ny <= 1 && !hasNeighbor; ny++)
+                    {
+                        for (int nz = -1; nz <= 1 && !hasNeighbor; nz++)
+                        {
+                            if (nx == 0 && ny == 0 && nz == 0) continue;
+                            int cx = vx + nx;
+                            int cy = vy + ny;
+                            int cz = vz + nz;
+                            if (cx < 0 || cy < 0 || cz < 0 || cx >= VoxelChunk.ChunkSize || cy >= VoxelChunk.ChunkSize || cz >= VoxelChunk.ChunkSize) continue;
+                            if (!previewChunk.GetVoxel(cx, cy, cz).IsEmpty)
+                            {
+                                hasNeighbor = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!hasNeighbor) return; // placement not allowed
+            }
 
             int half = brushSize / 2;
             Undo.RecordObject(previewChunk, paint ? "Paint Voxel" : "Erase Voxel");
@@ -533,10 +630,74 @@ namespace Deltalith.Editor
 
         void RegeneratePreviewMesh()
         {
-            if (previewChunk == null || previewMeshFilter == null) return;
+            if (previewChunk == null || previewMeshFilter == null || previewMeshRenderer == null) return;
+            
             Mesh m = VoxelMeshGenerator.GenerateMesh(previewChunk);
+            
+            if (m == null || m.vertexCount == 0)
+            {
+                previewMeshFilter.sharedMesh = null;
+                if (previewMeshCollider != null) previewMeshCollider.sharedMesh = null;
+                return;
+            }
+            
             previewMeshFilter.sharedMesh = m;
             if (previewMeshCollider != null) previewMeshCollider.sharedMesh = m;
+            
+            // CRITICAL: The mesh has submeshes and vertex colors - we need to assign materials properly
+            UpdateMeshRendererMaterials(m);
+        }
+        
+        void UpdateMeshRendererMaterials(Mesh mesh)
+        {
+            if (mesh == null || previewMeshRenderer == null) return;
+            
+            // Get or create a material that supports vertex colors
+            Material baseMat = previewMeshRenderer.sharedMaterial;
+            if (baseMat == null)
+            {
+                // Try to find a shader that supports vertex colors
+                Shader shader = Shader.Find("Legacy Shaders/VertexLit");
+                if (shader == null || !shader.isSupported)
+                {
+                    shader = Shader.Find("Legacy Shaders/Diffuse");
+                    if (shader == null || !shader.isSupported)
+                    {
+                        shader = Shader.Find("Standard");
+                        if (shader == null || !shader.isSupported)
+                        {
+                            shader = Shader.Find("Unlit/Color");
+                        }
+                    }
+                }
+                
+                if (shader != null && shader.isSupported)
+                {
+                    baseMat = new Material(shader);
+                    baseMat.color = Color.white; // White so vertex colors show through
+                    previewMeshRenderer.sharedMaterial = baseMat;
+                }
+                else
+                {
+                    Debug.LogError("Deltalith: Could not find a suitable shader for vertex colors!");
+                    return;
+                }
+            }
+            
+            // The mesh generator creates submeshes - we need to assign materials to all of them
+            if (mesh.subMeshCount > 0)
+            {
+                Material[] materials = new Material[mesh.subMeshCount];
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    materials[i] = baseMat; // All submeshes use the same material (vertex colors differentiate)
+                }
+                previewMeshRenderer.sharedMaterials = materials;
+            }
+            else
+            {
+                previewMeshRenderer.sharedMaterial = baseMat;
+            }
         }
 
         static bool RayAABBIntersection(Ray r, Vector3 boxMin, Vector3 boxMax, out float tmin, out float tmax)
@@ -618,12 +779,26 @@ namespace Deltalith.Editor
             if (!previewRoot.TryGetComponent<MeshCollider>(out previewMeshCollider))
                 previewMeshCollider = previewRoot.AddComponent<MeshCollider>();
 
-            // make sure mesh renderer has a simple material
+            // make sure mesh renderer has a material that supports vertex colors
             if (previewMeshRenderer.sharedMaterial == null)
             {
-                var mat = new Material(Shader.Find("Standard"));
-                mat.enableInstancing = true;
-                previewMeshRenderer.sharedMaterial = mat;
+                // Use VertexLit shader which properly supports vertex colors
+                Shader shader = Shader.Find("Legacy Shaders/VertexLit");
+                if (shader == null || !shader.isSupported)
+                {
+                    shader = Shader.Find("Legacy Shaders/Diffuse");
+                    if (shader == null || !shader.isSupported)
+                    {
+                        shader = Shader.Find("Standard");
+                    }
+                }
+                
+                if (shader != null && shader.isSupported)
+                {
+                    var mat = new Material(shader);
+                    mat.color = Color.white; // White base so vertex colors show through
+                    previewMeshRenderer.sharedMaterial = mat;
+                }
             }
 
             // camera
@@ -795,7 +970,7 @@ namespace Deltalith.Editor
             previewCubeMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             previewCubeMaterial.SetInt("_ZWrite", 0);
             previewCubeMaterial.DisableKeyword("_ALPHATEST_ON");
-            previewCubeMaterial.EnableKeyword("_ALPHBLEND_ON");
+            previewCubeMaterial.EnableKeyword("_ALPHABLEND_ON");
             previewCubeMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             previewCubeMaterial.renderQueue = 3000;
         }

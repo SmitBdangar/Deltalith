@@ -5,8 +5,8 @@ namespace Deltalith.Runtime
     [System.Serializable]
     public struct Voxel
     {
-        public byte id;        // 0 = empty, >0 = material index
-        public Color32 color;  // vertex color / tint
+        public byte id;       
+        public Color32 color;  
 
         public bool IsEmpty => id == 0;
 
