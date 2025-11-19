@@ -141,34 +141,136 @@ namespace Deltalith.Runtime
             var colors = new List<Color32>();
             var submeshTris = new Dictionary<int, List<int>>();
 
-            // Iterate through all voxels and add only exposed faces
-            for (int x = 0; x < size; x++)
+            for (int dir = 0; dir < 6; dir++)
             {
-                for (int y = 0; y < size; y++)
+                Vector3Int normal = DIRS[dir];
+                int axisU, axisV, axisW;
+
+                if (Mathf.Abs(normal.x) == 1)
                 {
-                    for (int z = 0; z < size; z++)
+                    axisW = 0; axisU = 2; axisV = 1;
+                }
+                else if (Mathf.Abs(normal.y) == 1)
+                {
+                    axisW = 1; axisU = 0; axisV = 2;
+                }
+                else
+                {
+                    axisW = 2; axisU = 0; axisV = 1;
+                }
+
+                int sizeU = size, sizeV = size, sizeW = size;
+                FaceMaskItem[] mask = new FaceMaskItem[sizeU * sizeV];
+
+                for (int w = -1; w < sizeW; w++)
+                {
+                    int n = 0;
+                    for (int v = 0; v < sizeV; v++)
                     {
-                        Voxel v = GetVoxelSafe(vox, size, x, y, z);
-                        if (v.IsEmpty) continue;
-
-                        // Offset by half-unit so cube centers align with voxel coordinates
-                        Vector3 voxelPos = new Vector3(x, y, z) + Vector3.one * 0.5f;
-
-                        // Check each of the 6 faces
-                        for (int faceIdx = 0; faceIdx < 6; faceIdx++)
+                        for (int u = 0; u < sizeU; u++)
                         {
-                            Vector3Int offset = FaceOffsets[faceIdx];
-                            int nx = x + offset.x;
-                            int ny = y + offset.y;
-                            int nz = z + offset.z;
+                            int[] a = new int[3];
+                            int[] b = new int[3];
 
-                            // Check if neighbor exists and is filled
-                            Voxel neighbor = GetVoxelSafe(vox, size, nx, ny, nz);
-                            if (!neighbor.IsEmpty)
-                                continue; // Face is hidden, skip it
+                            a[axisU] = u; a[axisV] = v; a[axisW] = w;
+                            b[axisU] = u; b[axisV] = v; b[axisW] = w + 1;
 
-                            // Face is exposed - add it to the mesh
-                            FaceData face = s_faceData[faceIdx];
+                            Voxel va = GetVoxelSafe(vox, size, a[0], a[1], a[2]);
+                            Voxel vb = GetVoxelSafe(vox, size, b[0], b[1], b[2]);
+
+                            bool aFull = !va.IsEmpty;
+                            bool bFull = !vb.IsEmpty;
+
+                            if (aFull == bFull)
+                            {
+                                mask[n] = FaceMaskItem.Empty;
+                            }
+                            else
+                            {
+                                if (aFull)
+                                {
+                                    mask[n] = new FaceMaskItem
+                                    {
+                                        material = va.id,
+                                        color = va.color,
+                                        faceDir = dir,
+                                        exists = true
+                                    };
+                                }
+                                else
+                                {
+                                    mask[n] = new FaceMaskItem
+                                    {
+                                        material = vb.id,
+                                        color = vb.color,
+                                        faceDir = dir,
+                                        exists = true
+                                    };
+                                }
+                            }
+
+                            n++;
+                        }
+                    }
+
+                    int i = 0;
+                    for (int v = 0; v < sizeV; v++)
+                    {
+                        for (int u = 0; u < sizeU;)
+                        {
+                            FaceMaskItem cur = mask[i];
+                            if (!cur.exists)
+                            {
+                                u++;
+                                i++;
+                                continue;
+                            }
+
+                            int width = 1;
+                            while (u + width < sizeU &&
+                                   mask[i + width].exists &&
+                                   mask[i + width].Equals(cur))
+                            {
+                                width++;
+                            }
+
+                            int height = 1;
+                            bool done = false;
+
+                            while (v + height < sizeV)
+                            {
+                                for (int k = 0; k < width; k++)
+                                {
+                                    if (!(mask[i + k + height * sizeU].exists &&
+                                          mask[i + k + height * sizeU].Equals(cur)))
+                                    {
+                                        done = true;
+                                        break;
+                                    }
+                                }
+
+                                if (done) break;
+                                height++;
+                            }
+
+                            Vector3[] quad = new Vector3[4];
+                            int[] pos = new int[3];
+                            pos[axisU] = u;
+                            pos[axisV] = v;
+                            pos[axisW] = w + 1;
+
+                            for (int c = 0; c < 4; c++)
+                            {
+                                Vector3 baseCorner = FACE_CORNERS[cur.faceDir, c];
+                                Vector3 world = Vector3.zero;
+
+                                world[axisU] = u + baseCorner[axisU] * width;
+                                world[axisV] = v + baseCorner[axisV] * height;
+                                world[axisW] = pos[axisW] + (baseCorner[axisW] > 0.5f ? 0 : -1);
+
+                                quad[c] = world;
+                            }
+
                             int vertStart = vertices.Count;
 
                             // Add vertices for this face (in order of vertexIndices)
