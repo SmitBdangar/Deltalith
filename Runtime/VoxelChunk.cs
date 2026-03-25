@@ -47,7 +47,7 @@ namespace Deltalith.Runtime
             return voxels[index];
         }
         
-        public void ApplyMesh(Mesh mesh)
+        public void ApplyMesh(Mesh mesh) //this will do work 
         {
             InitializeComponents();
             meshFilter.sharedMesh = mesh;
